@@ -268,6 +268,31 @@
     </div>
 
     <script>
+        // ===========================================
+        // CONFIGURATION SECTION
+        // ===========================================
+        
+        // Option 1: Manual article list (recommended for reliability)
+        const MANUAL_ARTICLES = [
+            // Add your HTML files here - this is the most reliable method
+            // { title: 'My First Article', path: 'article1.html', description: 'A great article about...' },
+            // { title: 'Tutorial Guide', path: 'tutorials/guide.html', description: 'Step by step tutorial' },
+            // { title: 'Blog Post', path: 'blog/post-2024-01.html', description: 'Latest blog post' },
+        ];
+        
+        // Option 2: Auto-detect configuration (for GitHub Pages)
+        const AUTO_DETECT_CONFIG = {
+            enabled: true,
+            // If auto-detection fails, manually set these:
+            owner: '', // your GitHub username
+            repo: '',  // your repository name
+            branch: 'main' // or 'master', 'gh-pages', etc.
+        };
+        
+        // ===========================================
+        // MAIN FUNCTIONALITY
+        // ===========================================
+        
         async function loadArticles() {
             const loadingEl = document.getElementById('loading');
             const articlesEl = document.getElementById('articles');
@@ -276,112 +301,205 @@
             const totalArticlesEl = document.getElementById('total-articles');
             const totalSizeEl = document.getElementById('total-size');
             
-            try {
-                // Get repository info from current URL
-                const pathParts = window.location.pathname.split('/').filter(part => part);
-                let owner, repo;
-                
-                if (window.location.hostname === 'github.io' || window.location.hostname.includes('github.io')) {
-                    // GitHub Pages URL format: username.github.io/repository-name
-                    if (pathParts.length === 0) {
-                        // User/organization page: username.github.io
-                        owner = window.location.hostname.split('.')[0];
-                        repo = owner + '.github.io';
-                    } else {
-                        // Project page: username.github.io/repository-name
-                        owner = window.location.hostname.split('.')[0];
-                        repo = pathParts[0];
-                    }
-                } else {
-                    // Custom domain or local development
-                    // Try to extract from common patterns or use defaults
-                    owner = 'owner'; // Will need to be manually configured
-                    repo = 'repository'; // Will need to be manually configured
-                }
-                
-                // GitHub API endpoint
-                const apiUrl = `https://api.github.com/repos/${owner}/${repo}/git/trees/main?recursive=1`;
-                
-                const response = await fetch(apiUrl);
-                if (!response.ok) {
-                    throw new Error(`GitHub API request failed: ${response.status}`);
-                }
-                
-                const data = await response.json();
-                const htmlFiles = data.tree
-                    .filter(item => 
-                        item.type === 'blob' && 
-                        item.path.endsWith('.html') && 
-                        item.path !== 'index.html' // Exclude the index file itself
-                    )
-                    .sort((a, b) => a.path.localeCompare(b.path));
-                
-                if (htmlFiles.length === 0) {
-                    articlesEl.innerHTML = '<div style="text-align: center; padding: 3rem; color: #666; font-size: 1.1rem;">No HTML articles found in this repository.</div>';
-                    loadingEl.style.display = 'none';
-                    return;
-                }
-                
-                // Calculate total size
-                let totalSize = 0;
-                const articles = await Promise.all(htmlFiles.map(async (file) => {
-                    try {
-                        // Get file details for size information
-                        const fileResponse = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${file.path}`);
-                        const fileData = await fileResponse.json();
-                        const fileSize = fileData.size || 0;
-                        totalSize += fileSize;
-                        
-                        // Extract title from filename or path
-                        const fileName = file.path.split('/').pop().replace('.html', '');
-                        const title = fileName
-                            .split(/[-_]/)
-                            .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-                            .join(' ');
-                        
-                        return {
-                            path: file.path,
-                            title: title,
-                            url: file.path,
-                            size: fileSize
-                        };
-                    } catch (e) {
-                        return {
-                            path: file.path,
-                            title: file.path.split('/').pop().replace('.html', ''),
-                            url: file.path,
-                            size: 0
-                        };
-                    }
-                }));
-                
-                // Update stats
-                totalArticlesEl.textContent = articles.length;
-                totalSizeEl.textContent = formatBytes(totalSize);
+            // First, try manual articles if configured
+            if (MANUAL_ARTICLES.length > 0) {
+                displayArticles(MANUAL_ARTICLES);
+                loadingEl.style.display = 'none';
                 statsEl.style.display = 'flex';
-                
-                // Generate article cards
-                articlesEl.innerHTML = articles.map(article => `
-                    <div class="article-card">
-                        <a href="${article.url}" class="article-title">${article.title}</a>
-                        <div class="article-path">${article.path}</div>
-                        <div class="article-meta">
-                            <span>Click to read article</span>
-                            <span class="article-size">${formatBytes(article.size)}</span>
-                        </div>
-                    </div>
-                `).join('');
-                
-                loadingEl.style.display = 'none';
-                
-            } catch (error) {
-                console.error('Error loading articles:', error);
-                loadingEl.style.display = 'none';
-                errorEl.style.display = 'block';
-                
-                // Fallback: try to detect HTML files in current directory
-                fallbackDetection();
+                totalArticlesEl.textContent = MANUAL_ARTICLES.length;
+                totalSizeEl.textContent = 'Manual Config';
+                return;
             }
+            
+            // If no manual articles and auto-detect is disabled, show configuration help
+            if (!AUTO_DETECT_CONFIG.enabled) {
+                showConfigurationHelp();
+                return;
+            }
+            
+            // Try auto-detection
+            try {
+                await attemptAutoDetection();
+            } catch (error) {
+                console.error('Auto-detection failed:', error);
+                showConfigurationHelp();
+            }
+        }
+        
+        async function attemptAutoDetection() {
+            const loadingEl = document.getElementById('loading');
+            const articlesEl = document.getElementById('articles');
+            const statsEl = document.getElementById('stats');
+            const totalArticlesEl = document.getElementById('total-articles');
+            const totalSizeEl = document.getElementById('total-size');
+            
+            // Try multiple detection methods
+            let owner, repo, branch = 'main';
+            
+            // Method 1: From configuration
+            if (AUTO_DETECT_CONFIG.owner && AUTO_DETECT_CONFIG.repo) {
+                owner = AUTO_DETECT_CONFIG.owner;
+                repo = AUTO_DETECT_CONFIG.repo;
+                branch = AUTO_DETECT_CONFIG.branch || 'main';
+            }
+            // Method 2: From GitHub Pages URL patterns
+            else {
+                const detection = detectFromURL();
+                if (!detection) {
+                    throw new Error('Could not detect repository info from URL');
+                }
+                owner = detection.owner;
+                repo = detection.repo;
+            }
+            
+            // Try main branch first, then master as fallback
+            const branches = [branch, 'master', 'gh-pages'];
+            let data = null;
+            
+            for (const branchName of branches) {
+                try {
+                    const apiUrl = `https://api.github.com/repos/${owner}/${repo}/git/trees/${branchName}?recursive=1`;
+                    const response = await fetch(apiUrl);
+                    
+                    if (response.ok) {
+                        data = await response.json();
+                        branch = branchName;
+                        break;
+                    }
+                } catch (e) {
+                    console.log(`Failed to fetch ${branchName} branch:`, e);
+                }
+            }
+            
+            if (!data) {
+                throw new Error('Could not fetch repository data from any branch');
+            }
+            
+            const htmlFiles = data.tree
+                .filter(item => 
+                    item.type === 'blob' && 
+                    item.path.endsWith('.html') && 
+                    item.path !== 'index.html' &&
+                    !item.path.includes('404.html')
+                )
+                .sort((a, b) => a.path.localeCompare(b.path));
+            
+            if (htmlFiles.length === 0) {
+                articlesEl.innerHTML = `
+                    <div style="text-align: center; padding: 3rem; color: #666; font-size: 1.1rem;">
+                        <h3>No HTML articles found</h3>
+                        <p>No HTML files were discovered in the <strong>${owner}/${repo}</strong> repository on the <strong>${branch}</strong> branch.</p>
+                        <p>Consider adding articles manually in the configuration section.</p>
+                    </div>
+                `;
+                loadingEl.style.display = 'none';
+                return;
+            }
+            
+            // Process files and get additional metadata
+            const articles = htmlFiles.map(file => {
+                const fileName = file.path.split('/').pop().replace('.html', '');
+                const title = fileName
+                    .split(/[-_]/)
+                    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+                    .join(' ');
+                
+                return {
+                    path: file.path,
+                    title: title,
+                    url: file.path,
+                    size: 0,
+                    description: `Article: ${title}`
+                };
+            });
+            
+            displayArticles(articles);
+            
+            // Update stats
+            totalArticlesEl.textContent = articles.length;
+            totalSizeEl.textContent = `${articles.length} files`;
+            statsEl.style.display = 'flex';
+            loadingEl.style.display = 'none';
+        }
+        
+        function detectFromURL() {
+            const hostname = window.location.hostname;
+            const pathname = window.location.pathname;
+            const pathParts = pathname.split('/').filter(part => part);
+            
+            if (hostname.endsWith('.github.io')) {
+                const owner = hostname.split('.')[0];
+                
+                if (pathParts.length === 0 || hostname === `${owner}.github.io`) {
+                    // User/organization page
+                    return { owner, repo: `${owner}.github.io` };
+                } else {
+                    // Project page
+                    return { owner, repo: pathParts[0] };
+                }
+            }
+            
+            return null;
+        }
+        
+        function displayArticles(articles) {
+            const articlesEl = document.getElementById('articles');
+            
+            articlesEl.innerHTML = articles.map(article => `
+                <div class="article-card">
+                    <a href="${article.url}" class="article-title">${article.title}</a>
+                    <div class="article-path">${article.path}</div>
+                    ${article.description ? `<p style="color: #666; margin: 0.5rem 0; font-size: 0.9rem;">${article.description}</p>` : ''}
+                    <div class="article-meta">
+                        <span>Click to read article</span>
+                        <span class="article-size">${article.size ? formatBytes(article.size) : 'HTML'}</span>
+                    </div>
+                </div>
+            `).join('');
+        }
+        
+        function showConfigurationHelp() {
+            const loadingEl = document.getElementById('loading');
+            const articlesEl = document.getElementById('articles');
+            const errorEl = document.getElementById('error');
+            
+            loadingEl.style.display = 'none';
+            errorEl.style.display = 'none';
+            
+            articlesEl.innerHTML = `
+                <div style="background: #f8f9fa; border-radius: 12px; padding: 2rem; margin: 2rem 0;">
+                    <h3 style="color: #2c3e50; margin-bottom: 1rem;">⚙️ Configuration Required</h3>
+                    <p style="color: #666; margin-bottom: 1.5rem;">To display your articles, please choose one of these options:</p>
+                    
+                    <div style="background: white; border-radius: 8px; padding: 1.5rem; margin-bottom: 1.5rem; border-left: 4px solid #667eea;">
+                        <h4 style="color: #2c3e50; margin-bottom: 1rem;">📝 Option 1: Manual Configuration (Recommended)</h4>
+                        <p style="color: #666; margin-bottom: 1rem;">Add your HTML files manually to the <code>MANUAL_ARTICLES</code> array in the script section:</p>
+                        <pre style="background: #f1f3f4; padding: 1rem; border-radius: 6px; overflow-x: auto; font-size: 0.9rem;"><code>const MANUAL_ARTICLES = [
+    { title: 'My First Article', path: 'article1.html', description: 'Description here' },
+    { title: 'Tutorial Guide', path: 'tutorials/guide.html', description: 'Step by step tutorial' },
+    // Add more articles...
+];</code></pre>
+                    </div>
+                    
+                    <div style="background: white; border-radius: 8px; padding: 1.5rem; border-left: 4px solid #52c41a;">
+                        <h4 style="color: #2c3e50; margin-bottom: 1rem;">🔧 Option 2: Configure Auto-Detection</h4>
+                        <p style="color: #666; margin-bottom: 1rem;">Set your repository details in the <code>AUTO_DETECT_CONFIG</code> section:</p>
+                        <pre style="background: #f1f3f4; padding: 1rem; border-radius: 6px; overflow-x: auto; font-size: 0.9rem;"><code>const AUTO_DETECT_CONFIG = {
+    enabled: true,
+    owner: 'your-github-username',
+    repo: 'your-repository-name',
+    branch: 'main'
+};</code></pre>
+                        <p style="color: #e67e22; font-size: 0.9rem; margin-top: 1rem;">⚠️ Note: Auto-detection requires your repository to be public.</p>
+                    </div>
+                    
+                    <div style="text-align: center; margin-top: 2rem;">
+                        <button onclick="location.reload()" style="background: #667eea; color: white; border: none; padding: 0.75rem 1.5rem; border-radius: 8px; cursor: pointer; font-size: 1rem;">
+                            🔄 Reload After Configuration
+                        </button>
+                    </div>
+                </div>
+            `;
         }
         
         function formatBytes(bytes) {
@@ -390,34 +508,6 @@
             const sizes = ['B', 'KB', 'MB', 'GB'];
             const i = Math.floor(Math.log(bytes) / Math.log(k));
             return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-        }
-        
-        async function fallbackDetection() {
-            // This is a simple fallback that won't work in all cases
-            // but provides a template for manual configuration
-            const articlesEl = document.getElementById('articles');
-            const errorEl = document.getElementById('error');
-            
-            // You can manually add your HTML files here
-            const manualArticles = [
-                // Example entries - replace with your actual files
-                // { title: 'My First Article', path: 'articles/first-article.html' },
-                // { title: 'Second Article', path: 'articles/second-article.html' },
-            ];
-            
-            if (manualArticles.length > 0) {
-                errorEl.style.display = 'none';
-                articlesEl.innerHTML = manualArticles.map(article => `
-                    <div class="article-card">
-                        <a href="${article.path}" class="article-title">${article.title}</a>
-                        <div class="article-path">${article.path}</div>
-                        <div class="article-meta">
-                            <span>Click to read article</span>
-                            <span class="article-size">Unknown size</span>
-                        </div>
-                    </div>
-                `).join('');
-            }
         }
         
         // Load articles when page loads
